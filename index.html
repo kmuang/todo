@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>To‑Do List</title> 
+  <link rel="shortcut icon" href="img/logo.png" type="image/x-icon">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* small custom styles */
+    .task-item.dragging { opacity: 0.6; }
+    .sr-only-focusable:focus { position: static; width: auto; height: auto; margin: 0; clip: auto; }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+  <main class="w-full max-w-3xl bg-white rounded-2xl shadow p-6 md:p-10">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-semibold">To‑Do List</h1>
+      <div class="text-sm text-gray-500">Saved locally • Responsive • Accessible</div>
+    </header>
+
+    <section class="mb-4">
+      <form id="todoForm" class="flex gap-2">
+        <label for="taskInput" class="sr-only">New task</label>
+        <input id="taskInput" type="text" placeholder="Add a new task..." class="flex-1 px-4 py-2 rounded-lg border focus:outline-none focus:ring-2" />
+        <button class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Add</button>
+      </form>
+
+      <div class="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div class="flex gap-2">
+          <button id="filterAll" class="filter-btn px-3 py-1 rounded-lg border">All</button>
+          <button id="filterActive" class="filter-btn px-3 py-1 rounded-lg border">Active</button>
+          <button id="filterDone" class="filter-btn px-3 py-1 rounded-lg border hover:bg-green-100">Done</button>
+        </div>
+        <div class="text-sm text-gray-600"><span id="count">0</span> tasks</div>
+      </div>
+    </section>
+
+    <section>
+      <ul id="taskList" class="space-y-2" aria-live="polite"></ul>
+    </section>
+
+    <footer class="mt-6 flex items-center justify-between text-sm text-gray-600">
+      <div>
+        <button id="clearDone" class="px-3 py-1 rounded-lg border">Clear done</button>
+        <button id="clearAll" class="px-3 py-1 rounded-lg border ml-2">Clear all</button>
+      </div>
+      <div>Drag to reorder • Double-click a task to edit</div>
+    </footer>
+  </main>
+
+  <template id="taskTpl">
+    <li class="task-item flex items-center justify-between gap-3 p-3 rounded-lg border bg-white" draggable="true">
+      <div class="flex items-center gap-3 min-w-0">
+        <input type="checkbox" class="task-check" aria-label="Mark task done" />
+        <div class="task-content min-w-0"> <span class="task-text break-words"></span> </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="edit-btn px-2 py-1 text-sm rounded border" aria-label="Edit task">Edit</button>
+        <button class="delete-btn px-2 py-1 text-sm rounded border" aria-label="Delete task">Delete</button>
+      </div>
+    </li>
+  </template>
+
+  <script>
+    // Simple responsive to-do app with localStorage persistence
+    const form = document.getElementById('todoForm');
+    const input = document.getElementById('taskInput');
+    const listEl = document.getElementById('taskList');
+    const tpl = document.getElementById('taskTpl');
+    const countEl = document.getElementById('count');
+    const filterBtns = document.querySelectorAll('.filter-btn');
+    const clearDoneBtn = document.getElementById('clearDone');
+    const clearAllBtn = document.getElementById('clearAll');
+
+    let tasks = []; // {id, text, done}
+    let filter = 'all';
+
+    // utils
+    const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+    const save = () => localStorage.setItem('todo.tasks.v1', JSON.stringify(tasks));
+    const load = () => JSON.parse(localStorage.getItem('todo.tasks.v1') || '[]');
+
+    // render
+    function render(){
+      listEl.innerHTML = '';
+      const filtered = tasks.filter(t => filter === 'all' ? true : (filter === 'active' ? !t.done : t.done));
+      filtered.forEach(t => {
+        const node = tpl.content.firstElementChild.cloneNode(true);
+        node.dataset.id = t.id;
+        const txt = node.querySelector('.task-text');
+        const chk = node.querySelector('.task-check');
+        const editBtn = node.querySelector('.edit-btn');
+        const delBtn = node.querySelector('.delete-btn');
+
+        txt.textContent = t.text;
+        chk.checked = t.done;
+        if (t.done) {
+          txt.classList.add('line-through','text-gray-500');
+        }
+
+        // toggle done
+        chk.addEventListener('change', () => {
+          const item = tasks.find(x => x.id === t.id);
+          if (item) { item.done = chk.checked; save(); render(); }
+        });
+
+        // delete
+        delBtn.addEventListener('click', () => {
+          tasks = tasks.filter(x => x.id !== t.id); save(); render();
+        });
+
+        // edit (double-click or edit button)
+        function enterEditMode(){
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = t.text;
+          input.className = 'w-full px-2 py-1 rounded border';
+          node.querySelector('.task-content').innerHTML = '';
+          node.querySelector('.task-content').appendChild(input);
+          input.focus();
+          // save on blur or Enter
+          input.addEventListener('blur', () => finishEdit(input.value));
+          input.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { render(); }});
+        }
+        function finishEdit(val){
+          const item = tasks.find(x => x.id === t.id);
+          if (item) { item.text = val.trim() || item.text; save(); render(); }
+        }
+
+        editBtn.addEventListener('click', enterEditMode);
+        node.querySelector('.task-content').addEventListener('dblclick', enterEditMode);
+
+        // drag and drop handlers
+        node.addEventListener('dragstart', (e) => {
+          node.classList.add('dragging');
+          e.dataTransfer.setData('text/plain', t.id);
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        node.addEventListener('dragend', () => node.classList.remove('dragging'));
+
+        listEl.appendChild(node);
+      });
+
+      countEl.textContent = tasks.length;
+
+      // update filter button styles
+      filterBtns.forEach(b => b.classList.toggle('bg-indigo-50', b.id === ('filter' + capitalize(filter))));
+    }
+
+    // DnD reorder on list
+    listEl.addEventListener('dragover', (e)=>{
+      e.preventDefault();
+      const afterEl = getDragAfterElement(listEl, e.clientY);
+      const dragging = listEl.querySelector('.dragging');
+      if (!dragging) return;
+      if (!afterEl) listEl.appendChild(dragging);
+      else listEl.insertBefore(dragging, afterEl);
+    });
+    listEl.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      // rebuild tasks ordering from DOM
+      const ids = Array.from(listEl.children).map(li => li.dataset.id);
+      tasks = ids.map(id => tasks.find(t => t.id === id)).filter(Boolean);
+      save(); render();
+    });
+
+    function getDragAfterElement(container, y){
+      const draggableElements = [...container.querySelectorAll('.task-item:not(.dragging)')];
+      return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) return { offset, element: child };
+        return closest;
+      }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    // events
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      tasks.unshift({ id: uid(), text, done: false });
+      input.value = '';
+      save(); render();
+    });
+
+    filterBtns.forEach(b => b.addEventListener('click', () => {
+      if (b.id === 'filterAll') filter = 'all';
+      if (b.id === 'filterActive') filter = 'active';
+      if (b.id === 'filterDone') filter = 'done';
+      render();
+    }));
+
+    clearDoneBtn.addEventListener('click', () => {
+      tasks = tasks.filter(t => !t.done); save(); render();
+    });
+    clearAllBtn.addEventListener('click', () => {
+      if (!confirm('Clear all tasks?')) return;
+      tasks = []; save(); render();
+    });
+
+    // keyboard shortcuts
+    window.addEventListener('keydown', (e)=>{
+      if (e.ctrlKey && e.key === 'k') { e.preventDefault(); input.focus(); }
+      if (e.key === 'Escape') input.blur();
+    });
+
+    // helpers
+    function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+    // init
+    (function init(){
+      tasks = load();
+      render();
+      // mobile: enlarge tap targets
+      input.setAttribute('autocomplete','off');
+    })();
+  </script>
+</body>
+</html>
